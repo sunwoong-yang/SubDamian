@@ -1,5 +1,5 @@
 from surrogate_model.HK_functions import *
-
+from PrePost.PrePost import normalize_multifidelity
 from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.optimize import minimize
 from pymoo.termination.robust import RobustTermination
@@ -15,14 +15,15 @@ class HK:
 	###################################
 	def __init__(self, x, y, n_pop=None, n_gen=None, HKtype="r"):
 		self.t_start = time.time()
-		self.x, self.y = x, y
+		x, self.x_scaler, x_original = normalize_multifidelity(x)
+		self.x, self.y = x, y # normalized x
 		self.y = [y.reshape(-1) for y in self.y]
 		# for each_y in self.y:
 		# 	each_y.reshape(-1)
 		if n_pop is None:
-			n_pop = [100] * len(x)
+			n_pop = [30] * len(x)
 		if n_gen is None:
-			n_gen = [100] * len(x)
+			n_gen = [30] * len(x)
 		self.pop, self.gen = np.array(n_pop), np.array(n_gen)
 		self.total_level = len(x)
 		self.current_level = 0
@@ -86,11 +87,13 @@ class HK:
 		self.total_F.append(F)
 
 	###################################
-	def predict(self, X, pred_fidelity=None, surro_dir=None, return_std=True):  # $%^&
-		# HF들의 y와 MSE 계산에는 r_vector와 y_pred의 계산만 새로 필요. 나머지는 새로 계산할 필요 없음
+	def predict(self, X, pred_fidelity=None, surro_dir=None, return_std=True):
 
 		if pred_fidelity is None:
 			pred_fidelity = self.total_level - 1
+
+		# Scale input "X" before the prediction
+		X = normalize_multifidelity(X, Scaler=self.x_scaler[pred_fidelity])
 
 		if surro_dir is not None:  # $%^&
 			self.total_opt_theta = surro_dir  # $%^&
@@ -352,17 +355,17 @@ class HK:
 
 				res = minimize(problem,
 				               algorithm,
-				               ("n_gen", gen_size),
+				               # ("n_gen", gen_size),
 				               #  verbose=True,
 				               #  disply = MyDisplay()
 
 				               )
 			elif fixed_gen == 0:
-				termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=10)
+				termination = RobustTermination(DesignSpaceTermination(tol=10**-2), period=5)
 				res = minimize(problem,
 				               algorithm,
 				               termination,
-				               ("n_gen", gen_size),
+				               # ("n_gen", gen_size),
 				               #  verbose=True,
 				               #  disply = MyDisplay()
 
@@ -408,17 +411,17 @@ class HK:
 
 				res = minimize(problem,
 				               algorithm,
-				               ("n_gen", gen_size),
+				               # ("n_gen", gen_size),
 				               #  verbose=True,
 				               #  disply = MyDisplay()
 
 				               )
 			elif fixed_gen == 0:
-				termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=10)
+				termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=5)
 				res = minimize(problem,
 				               algorithm,
 				               termination,
-				               ("n_gen", gen_size),
+				               # ("n_gen", gen_size),
 				               #  verbose=True,
 				               #  disply = MyDisplay()
 
@@ -523,18 +526,18 @@ class HK:
 			               eliminate_duplicates=True
 			               )
 		if VALorEI != "VFEI":  # VFEI가 아닐 때
-			termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=10)
+			termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=5)
 
 			res = minimize(problem,
 			               algorithm,
 			               termination,
-			               ("n_gen", gen_size)
+			               # ("n_gen", gen_size)
 			               #  verbose=True,
 			               )
 		else:
 			res = minimize(problem,
 			               algorithm,
-			               ("n_gen", gen_size)
+			               # ("n_gen", gen_size)
 			               #  verbose=True,
 
 			               )
