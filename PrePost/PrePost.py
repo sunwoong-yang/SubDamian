@@ -69,7 +69,7 @@ def csv2Num(N_inp, dir="DOEset1.csv", mini_batch = None):
     return H_inp, H_out, inp_dataset, out_dataset
 
 def normalize(data):
-    STD = Scaler()
+    STD = StandardScaler()
     scaled_data = STD.fit_transform(data)
     return scaled_data, STD
 
