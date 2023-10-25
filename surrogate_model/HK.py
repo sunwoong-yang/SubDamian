@@ -1,9 +1,13 @@
 from surrogate_model.HK_functions import *
 from PrePost.PrePost import normalize_multifidelity
+
 from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.optimize import minimize
+from pymoo.core.termination import TerminateIfAny
 from pymoo.termination.robust import RobustTermination
 from pymoo.termination.xtol import DesignSpaceTermination
+from pymoo.termination.ftol import SingleObjectiveSpaceTermination
+from pymoo.termination.max_gen import MaximumGenerationTermination
 from pymoo.factory import get_sampling, get_crossover, get_mutation
 from pymoo.operators.mutation.pm import PM
 from pymoo.core.problem import ElementwiseProblem
@@ -15,7 +19,7 @@ class HK:
 	###################################
 	def __init__(self, x, y, n_pop=None, n_gen=None, HKtype="r"):
 		self.t_start = time.time()
-		x, self.x_scaler, x_original = normalize_multifidelity(x)
+		x, self.x_scaler, self.x_original = normalize_multifidelity(x)
 		self.x, self.y = x, y # normalized x
 		self.y = [y.reshape(-1) for y in self.y]
 		# for each_y in self.y:
@@ -29,15 +33,15 @@ class HK:
 		self.current_level = 0
 		self.HKtype = HKtype  # Regression: "r" & Interpolation: "i"
 		self.total_opt_theta, self.total_R, self.total_invR, self.total_F, self.total_beta, self.total_sigmaSQ, self.total_MLE = [], [], [], [], [], [], []
-		if self.HKtype == ("i" or "I"):
+		if self.HKtype == "i" or self.HKtype == "I":
 			pass
-		elif self.HKtype == ("r" or "R"):
+		elif self.HKtype == "r" or self.HKtype == "R":
 			self.total_opt_nugget, self.total_opt_order = [], []
 		else:
 			print("Invalid HK type")
 
 	###################################
-	def fit(self, history=False, to_level=None):
+	def fit(self, history=False, to_level=None, rand_seed=None):
 		if to_level is None:  # to_level 입력안되면 모든 fidelity 학습
 			to_level = self.total_level - 1
 
@@ -48,7 +52,7 @@ class HK:
 			x, y = self.x[self.current_level], self.y[self.current_level]
 
 			self.opt_bef_action()
-			self.GA_results = self.GA_krig(self.current_level)
+			self.GA_results = self.GA_krig(self.current_level, rand_seed=rand_seed)
 			self.opt_X = self.GA_results[0]
 			self.opt_aft_action(x, y, self.opt_X)
 
@@ -58,7 +62,8 @@ class HK:
 
 			announce = "   Final generation = %s" % (self.GA_results[2])
 			announce += "\n   Optimal theta = %s" % (self.total_opt_theta[self.current_level])
-			if self.HKtype == ("r" or "R"):
+			announce += "\n   Optimal beta = %s" % (self.total_beta[self.current_level])
+			if self.HKtype == "r" or self.HKtype == "R":
 				announce += "\n   Optimal nugget = %E" % (self.total_opt_nugget[self.current_level])
 			announce += "\n   Optimal likelihood = %f" % (self.total_MLE[self.current_level])
 			announce += "\n   Optimal R's condition number = %f" % (np.linalg.cond(self.total_R[self.current_level]))
@@ -102,9 +107,9 @@ class HK:
 		R = self.total_R[pred_fidelity]
 		invR = self.total_invR[pred_fidelity]
 
-		if self.HKtype == ("i" or "I"):
+		if self.HKtype == "i" or self.HKtype == "I":
 			temp_X = self.total_opt_theta[pred_fidelity]
-		elif self.HKtype == ("r" or "R"):
+		elif self.HKtype == "r" or self.HKtype == "R":
 			temp_X = self.total_opt_theta[pred_fidelity]
 			temp_X = np.append(temp_X, self.total_opt_nugget[pred_fidelity])
 
@@ -113,7 +118,7 @@ class HK:
 		beta = self.total_beta[pred_fidelity]
 		sigmaSQ = self.total_sigmaSQ[pred_fidelity]
 
-		if self.HKtype == ("i" or "I"):
+		if self.HKtype == "i" or self.HKtype == "I":
 			if pred_fidelity == 0:
 
 				y_pred = beta + r_vector.transpose() @ invR @ (self.y[pred_fidelity] - F * beta)
@@ -136,7 +141,7 @@ class HK:
 
 					MSE.append((sigmaSQ * (1 - temp_2 + (temp_3 - y_lf[i]) * (temp_1) * (temp_3 - y_lf[i]))))
 
-		if self.HKtype == ("r" or "R"):
+		if self.HKtype == "r" or self.HKtype == "R":
 			# nugget 그냥 빼버리면 inv 계산에서 또 수치에러 발생. 이를 완화위해 trick으로 10**-9 fixed nugget 사용
 			regression_invR = np.linalg.inv(
 				R - self.total_opt_nugget[pred_fidelity] * np.identity(N_pts_test) + 10 ** -9 * np.identity(N_pts_test))
@@ -189,10 +194,10 @@ class HK:
 		sigmaSQ = cal_sigmaSQ(N_pts, self.y[self.current_level], F, beta, invR)
 		MLE = cal_MLE(N_pts, sigmaSQ, R)
 
-		if self.HKtype == ("i" or "I"):
+		if self.HKtype == "i" or self.HKtype == "I":
 			opt_theta = opt_X
 
-		if self.HKtype == ("r" or "R"):
+		if self.HKtype == "r" or self.HKtype == "R":
 			opt_theta = opt_X[:-1]
 			opt_nugget = opt_X[-1]
 			self.total_opt_nugget.append(opt_nugget)
@@ -291,7 +296,7 @@ class HK:
 			return y, np.sqrt((MSE)), MLE
 
 	###################################
-	def GA_krig(self, current_level):
+	def GA_krig(self, current_level, rand_seed=None):
 		n_var = self.x[current_level].shape[1]
 		pop_size = self.pop[current_level]
 		gen_size = self.gen[current_level]
@@ -304,6 +309,7 @@ class HK:
 		# nested class 때문에 아래와 같이 새로 정의
 		x, y = self.x[current_level], self.y[current_level]
 		HKtype = self.HKtype
+		print(HKtype)
 		total_F = self.total_F
 
 		def GA_cal_kriging(x, y, X, current_level):
@@ -319,7 +325,7 @@ class HK:
 
 			return MLE
 
-		if HKtype == ("i" or "I"):  # Hyper-parameter : theta only
+		if HKtype == "i" or HKtype == "I":  # Hyper-parameter : theta only
 
 			class MyProblem(ElementwiseProblem):
 
@@ -355,16 +361,20 @@ class HK:
 
 				res = minimize(problem,
 				               algorithm,
+				               seed=rand_seed,
 				               # ("n_gen", gen_size),
 				               #  verbose=True,
 				               #  disply = MyDisplay()
 
 				               )
 			elif fixed_gen == 0:
-				termination = RobustTermination(DesignSpaceTermination(tol=10**-2), period=5)
+				# termination = RobustTermination(DesignSpaceTermination(tol=10**-2), period=5)
+				# termination = MaximumGenerationTermination(n_max_gen=150)
+				termination = TerminateIfAny(RobustTermination(DesignSpaceTermination(tol=10**-2), period=10), MaximumGenerationTermination(n_max_gen=100))
 				res = minimize(problem,
 				               algorithm,
 				               termination,
+				               seed=rand_seed,
 				               # ("n_gen", gen_size),
 				               #  verbose=True,
 				               #  disply = MyDisplay()
@@ -376,7 +386,7 @@ class HK:
 			# res.algorithm.pop : 마지막 population임 추후 initialization에 사용 가능
 			return opt, res.F, res.algorithm.n_gen
 
-		elif HKtype == ("r" or "R"):  # Hyper-parameter : theta, nugget
+		elif HKtype == "r" or HKtype == "R":  # Hyper-parameter : theta, nugget
 			class MyProblem(ElementwiseProblem):
 
 				def __init__(self):
@@ -384,7 +394,7 @@ class HK:
 					                 n_obj=1,
 					                 n_constr=0,
 					                 xl=np.array([-6.] * n_var + [-12.]),  # cubit spline --> 변수개수 + nugget
-					                 xu=np.array([3.] * n_var + [0.]),
+					                 xu=np.array([3.] * n_var + [-3.]), # default -3. for nugget
 
 					                 )
 
@@ -411,16 +421,20 @@ class HK:
 
 				res = minimize(problem,
 				               algorithm,
+				               seed=rand_seed,
 				               # ("n_gen", gen_size),
 				               #  verbose=True,
 				               #  disply = MyDisplay()
 
 				               )
 			elif fixed_gen == 0:
-				termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=5)
+				# termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=5)
+				# termination = MaximumGenerationTermination(n_max_gen=150)
+				termination = TerminateIfAny(RobustTermination(DesignSpaceTermination(tol=10**-2), period=10), MaximumGenerationTermination(n_max_gen=100))
 				res = minimize(problem,
 				               algorithm,
 				               termination,
+				               seed=rand_seed,
 				               # ("n_gen", gen_size),
 				               #  verbose=True,
 				               #  disply = MyDisplay()
@@ -432,7 +446,7 @@ class HK:
 			return opt, res.F, res.algorithm.n_gen
 
 	###################################
-	def opt_on_surrogate(self, xl, xu, pop, gen, current_level, VALorEI, morM="M"):
+	def opt_on_surrogate(self, xl, xu, pop, gen, current_level, VALorEI, morM="M", rand_seed=None):
 		# morM : y값을 최소화면 "m" 최대화면 "M"
 		# VALorEI : 함수값 최적화면 "VAL" EI 최적화면 "EI" VFEI 최적화면 "VFEI"
 		n_var = self.x[current_level].shape[1]
@@ -526,17 +540,21 @@ class HK:
 			               eliminate_duplicates=True
 			               )
 		if VALorEI != "VFEI":  # VFEI가 아닐 때
-			termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=5)
+			# termination = RobustTermination(DesignSpaceTermination(tol=10**-4), period=5)
+			# termination = MaximumGenerationTermination(n_max_gen=150)
+			termination = TerminateIfAny(RobustTermination(DesignSpaceTermination(tol=10**-2), period=10), MaximumGenerationTermination(n_max_gen=100))
 
 			res = minimize(problem,
 			               algorithm,
 			               termination,
+			               seed=rand_seed,
 			               # ("n_gen", gen_size)
 			               #  verbose=True,
 			               )
 		else:
 			res = minimize(problem,
 			               algorithm,
+			               seed=rand_seed,
 			               # ("n_gen", gen_size)
 			               #  verbose=True,
 
@@ -604,10 +622,18 @@ class HK:
 
 		return EI
 
+	def cal_error(self, x, y_real, level=None):
+		if level is None:
+			level = self.total_level - 1
+		rmse = self.RMSE(x, y_real, level)
+		mae = self.MAE(x, y_real, level)
+		rsq = self.Rsq(x, y_real, level)
+		return np.array([rmse, mae, rsq])
+
 	###################################
 	def Rsq(self, x, y_real, level):
-		y_pred = self.pred_y_MSE(x, level)[0]
-		correlation_matrix = np.corrcoef(y_pred, y_real)
+		y_pred = self.predict(x, level)[0]
+		correlation_matrix = np.corrcoef(y_pred, y_real.reshape(-1))
 		correlation_xy = correlation_matrix[0, 1]
 		return correlation_xy ** 2
 
@@ -615,10 +641,12 @@ class HK:
 	def RMSE(self, x, y_real, level):
 		y_pred = self.predict(x, level)[0]
 		ans = np.sqrt((np.sum((y_pred - y_real) ** 2)) / y_real.shape[0])
+		# ans = np.sqrt(np.sum((y_real - y_pred) ** 2) / len(y_real)) / np.mean(y_real)  # NRMSE
 		return ans
 
 	###################################
 	def MAE(self, x, y_real, level):
 		y_pred = self.predict(x, level)[0]
 		ans = np.sum(np.abs(y_pred - y_real)) / y_real.shape[0]
+		# ans = np.sum(np.abs((y_pred - y_real) / y_real)) / len(y_real)  # MAPE
 		return ans

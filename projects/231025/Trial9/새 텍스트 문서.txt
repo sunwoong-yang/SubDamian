@@ -1,0 +1,21 @@
+DE = DeepEnsemble(N_inp, [50, 50, 50], "GELU", N_out, num_models=5)
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
+DE = DE.to(device)
+
+criterion_ = nn.MSELoss()
+
+optimizer_ = optim.Adam(DE.parameters(), lr=1e-2)
+DE.fit(train_x, train_y, 500, optimizer_)
+draw_fig(train_x, train_y, "train1")
+draw_fig(test_x, test_y, "test1")
+
+optimizer_ = optim.Adam(DE.parameters(), lr=1e-3)
+DE.fit(train_x, train_y, 1000, optimizer_)
+draw_fig(train_x, train_y, "train2")
+draw_fig(test_x, test_y, "test2")
+
+optimizer_ = optim.Adam(DE.parameters(), lr=1e-4)
+DE.fit(train_x, train_y, 1000, optimizer_)
+draw_fig(train_x, train_y, "train3")
+draw_fig(test_x, test_y, "test3")

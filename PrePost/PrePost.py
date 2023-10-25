@@ -64,14 +64,31 @@ def csv2Ten(N_inp, dir="DOEset1.csv", mini_batch = None):
     H_inp, H_out, X, Y = read_csv(N_inp, dir)
     return H_inp, H_out, Num2Ten(X), Num2Ten(Y)
 
-def csv2Num(N_inp, dir="DOEset1.csv", mini_batch = None):
+def csv2Num(N_inp, dir="DOEset1.csv", train_size = 0):
     H_inp, H_out, inp_dataset, out_dataset =  read_csv(N_inp, dir)
-    return H_inp, H_out, inp_dataset, out_dataset
+
+    if train_size != 0:
+        np.random.seed(42)
+        # Data shuffling
+        random_idx = np.arange(inp_dataset.shape[0])
+        np.random.shuffle(random_idx)
+        inp_shuffled, out_shuffled = inp_dataset[random_idx], out_dataset[random_idx]
+
+        # Train-Test split
+        inp_train, out_train = inp_shuffled[:train_size], out_shuffled[:train_size]
+        inp_test, out_test = inp_shuffled[train_size:], out_shuffled[train_size:]
+
+        return H_inp, H_out, inp_train, out_train, inp_test, out_test
+    else:
+        return H_inp, H_out, inp_dataset, out_dataset
 
 def normalize(data):
-    STD = StandardScaler()
-    scaled_data = STD.fit_transform(data)
-    return scaled_data, STD
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(data)
+    return scaled_data, scaler
+
+def denormalize(data, scaler):
+    return scaler.inverse_transform(data)
 
 def normalize_multifidelity(data, minmax = True, Scaler=None): # for multi-fidelity data
     scaled_data_list, Scaler_list = [], []

@@ -16,7 +16,7 @@ class GPR(sklearn_GPR):
 
         if ("kernel" not in self.kwargs) or (self.kwargs["kernel"] is None):
             self.kwargs["kernel"] = sklearn_kernels.ConstantKernel(1, constant_value_bounds=[(1e-1,1e3)] * 1) * \
-                                    sklearn_kernels.RBF(np.ones(self.input_dim), length_scale_bounds=[(1e-1, 1e3)] * self.input_dim)
+                                    sklearn_kernels.Matern(np.ones(self.input_dim), length_scale_bounds=[(1e-1, 1e3)] * self.input_dim, nu=2.5)
 
         self.model.fit(train_x_normalized, train_y_normalized) # 모델학습은 scaling된 후의 데이터로 수행되어야함
 
